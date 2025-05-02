@@ -5,7 +5,7 @@ public class Agent00AIPlugin
     [KernelFunction]
     public void Tickle()
     {
-        var remainingLife = VillianPlugin.SubtractLifePoints(10);
+        var remainingLife = VillianPlugin.SubtractLifePoints(20);
         Console.WriteLine(
             $"Agent 00AI tickled the villain! Remaining life points: {remainingLife}"
         );

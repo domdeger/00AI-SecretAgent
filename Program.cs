@@ -1,9 +1,8 @@
 ﻿using System.Text.Json;
-using _00AI.Messages;
-using _00AI.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
+using Microsoft.SemanticKernel.Agents.Chat;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Spectre.Console;
 
@@ -22,6 +21,12 @@ var llmSettings =
 // Create Kernel builder
 var kernelBuilder = Kernel
     .CreateBuilder()
+    .AddAzureOpenAIChatCompletion(
+        deploymentName: llmSettings.Model,
+        modelId: llmSettings.Model,
+        apiKey: llmSettings.Token,
+        endpoint: llmSettings.Endpoint
+    );
 
 kernelBuilder.Plugins.AddFromType<DecryptPlugin>();
 var kernel = kernelBuilder.Build();
@@ -30,7 +35,7 @@ var jsonSerializerSettings = new JsonSerializerOptions { PropertyNameCaseInsensi
 AnsiConsole.MarkupLine("[italic][green]Welcome to the 00AI Mission Control Center.[/][/]");
 
 // Create the analytic agent using the factory
-var analyticAgent = AIAgentFactory.CreateMessageAnalyticAgent(kernel => 
+var analyticAgent = AIAgentFactory.CreateMessageAnalyticAgent(kernel =>
 {
     kernel.AddAzureOpenAIChatCompletion(
         deploymentName: llmSettings.Model,
@@ -39,7 +44,6 @@ var analyticAgent = AIAgentFactory.CreateMessageAnalyticAgent(kernel =>
         endpoint: llmSettings.Endpoint
     );
 });
-
 
 var message = SecretMessageGenerator.GenerateSecretMessage();
 AnsiConsole.MarkupLine(
@@ -59,14 +63,31 @@ ChatHistory chatMessageContents =
 [
     new(AuthorRole.User, "Hello, I need help decrypting a message."),
     new(AuthorRole.User, $"The message is: {messageContents.Content}"),
+    new(AuthorRole.User, "First make a plan how to analyze and decrpyt the message."),
 ];
 
 ChatHistoryAgentThread chatHistoryAgentThread = new(chatMessageContents);
 
+await analyticAgent.InvokeAsync(chatHistoryAgentThread).ToArrayAsync();
+chatHistoryAgentThread.ChatHistory.AddUserMessage("Now decrypt the message.");
 var response = await analyticAgent.InvokeAsync(chatHistoryAgentThread).ToArrayAsync();
+
 var decyrptedMessage = response.First().Message.ToString();
 
-var villianAgent = AIAgentFactory.CreateVillianAgent(kernel => 
+var villianAgent = AIAgentFactory.CreateVillianAgent(
+    kernel =>
+    {
+        kernel.AddAzureOpenAIChatCompletion(
+            deploymentName: llmSettings.Model,
+            modelId: llmSettings.Model,
+            apiKey: llmSettings.Token,
+            endpoint: llmSettings.Endpoint
+        );
+    },
+    messageContents.Recipient
+);
+
+var agent00AI = AIAgentFactory.CreateAgent00AI(kernel =>
 {
     kernel.AddAzureOpenAIChatCompletion(
         deploymentName: llmSettings.Model,
@@ -74,7 +95,7 @@ var villianAgent = AIAgentFactory.CreateVillianAgent(kernel =>
         apiKey: llmSettings.Token,
         endpoint: llmSettings.Endpoint
     );
-}, messageContents.Recipient);
+});
 
 AnsiConsole.MarkupLine(
     "[bold yellow]Sender:[/] [bold blue]{0}[/]\n[bold yellow]Recipient:[/] [bold blue]{1}[/]",
@@ -87,3 +108,29 @@ AnsiConsole.MarkupLine(
     "[bold red]We could catch \"{0}\" and bring her/him to a hidden outpost. Mr. 00AI, let's start the interrogation.[/]",
     messageContents.Recipient
 );
+
+var interrogationGroupChat = new AgentGroupChat(agent00AI, villianAgent);
+interrogationGroupChat.ExecutionSettings = new()
+{
+    SelectionStrategy = new SequentialSelectionStrategy(),
+    TerminationStrategy = new KernelFunctionTerminationStrategy(
+        KernelFunctionFactory.CreateFromPrompt(
+            @"If the villian provided the secret, write 'yes'. Otherwise write 'no'.
+             \n{{$_history_}}"
+        ),
+        kernel
+    )
+    {
+        ResultParser = result =>
+            result.ToString().Equals("yes", StringComparison.CurrentCultureIgnoreCase),
+    },
+};
+
+await foreach (var messagePart in interrogationGroupChat.InvokeAsync())
+{
+    AnsiConsole.MarkupLine(
+        "[bold red]{0}:[/] [bold blue]{1}[/]",
+        messagePart.AuthorName,
+        messagePart.Content
+    );
+}

@@ -1,14 +1,20 @@
-using System;
-using System.Linq;
 using System.Text;
 using Microsoft.SemanticKernel;
 
 public class DecryptPlugin
 {
     [KernelFunction]
+    public IEnumerable<string> GetWordsWithLength(string text, int length) =>
+        text.Split([' ', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => word.Length == length);
+
+    [KernelFunction]
+    public int CharFrequency(string text, char character) => text.Count(c => c == character);
+
+    [KernelFunction]
     public string DecryptCaesarCipher(string cipherText, int shift)
     {
-        StringBuilder decryptedText = new StringBuilder();
+        StringBuilder decryptedText = new();
 
         foreach (char c in cipherText)
         {
