@@ -1,10 +1,10 @@
 ﻿using System.Text.Json;
 using _00AI.Messages;
+using _00AI.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Spectre.Console;
 
 // Build configuration
@@ -22,43 +22,37 @@ var llmSettings =
 // Create Kernel builder
 var kernelBuilder = Kernel
     .CreateBuilder()
-    .AddAzureOpenAIChatCompletion(
-        deploymentName: llmSettings.Model,
-        modelId: llmSettings.Model,
-        apiKey: llmSettings.Token,
-        endpoint: llmSettings.Endpoint
-    );
+
 kernelBuilder.Plugins.AddFromType<DecryptPlugin>();
 var kernel = kernelBuilder.Build();
 
 var jsonSerializerSettings = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 AnsiConsole.MarkupLine("[italic][green]Welcome to the 00AI Mission Control Center.[/][/]");
 
-ChatCompletionAgent analyticAgent = new()
+// Create the analytic agent using the factory
+var analyticAgent = AIAgentFactory.CreateMessageAnalyticAgent(kernel => 
 {
-    Kernel = kernel,
-    Name = "CryptoAnalyticAgent",
-    Arguments = new(
-        new OpenAIPromptExecutionSettings()
-        {
-            FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-        }
-    ),
-    Instructions =
-        "You are an agent that helps to analyze encrypted messages and provides solutions to decrypt them. If possible use your tools to decrypt the message. If you cannot decrypt the message, provide a detailed explanation of why you cannot decrypt it.",
-};
+    kernel.AddAzureOpenAIChatCompletion(
+        deploymentName: llmSettings.Model,
+        modelId: llmSettings.Model,
+        apiKey: llmSettings.Token,
+        endpoint: llmSettings.Endpoint
+    );
+});
+
 
 var message = SecretMessageGenerator.GenerateSecretMessage();
-AnsiConsole.MarkupLine("[bold yellow]Encrypted Message:[/] [bold blue]{0}[/]", message);
-
-var messageChatResponse = await kernel.InvokePromptAsync(
-    $"Extract the contents of the following message. It contains some encrypted data. Do not decrypt the payload. Just add extract the data, do not make anything up:\n {message}",
-    new(new OpenAIPromptExecutionSettings() { ResponseFormat = typeof(Message) }) { }
+AnsiConsole.MarkupLine(
+    "[bold yellow]Encrypted Message intercepted:[/]\n[bold blue]{0}[/]",
+    message
 );
 
-var messageContents =
-    JsonSerializer.Deserialize<Message>(messageChatResponse.ToString(), jsonSerializerSettings)
-    ?? throw new Exception("Failed to deserialize message contents.");
+// Use the message decryptor to extract message contents
+var messageContents = await MessageDataExtraction.ExtractMessageContents(
+    kernel,
+    message,
+    jsonSerializerSettings
+);
 
 // Create a new chat session
 ChatHistory chatMessageContents =
@@ -70,4 +64,26 @@ ChatHistory chatMessageContents =
 ChatHistoryAgentThread chatHistoryAgentThread = new(chatMessageContents);
 
 var response = await analyticAgent.InvokeAsync(chatHistoryAgentThread).ToArrayAsync();
-Console.WriteLine(response);
+var decyrptedMessage = response.First().Message.ToString();
+
+var villianAgent = AIAgentFactory.CreateVillianAgent(kernel => 
+{
+    kernel.AddAzureOpenAIChatCompletion(
+        deploymentName: llmSettings.Model,
+        modelId: llmSettings.Model,
+        apiKey: llmSettings.Token,
+        endpoint: llmSettings.Endpoint
+    );
+}, messageContents.Recipient);
+
+AnsiConsole.MarkupLine(
+    "[bold yellow]Sender:[/] [bold blue]{0}[/]\n[bold yellow]Recipient:[/] [bold blue]{1}[/]",
+    messageContents.Sender,
+    messageContents.Recipient
+);
+AnsiConsole.MarkupLine("[bold yellow]Decrypted Message:[/] [bold blue]{0}[/]", decyrptedMessage);
+
+AnsiConsole.MarkupLine(
+    "[bold red]We could catch \"{0}\" and bring her/him to a hidden outpost. Mr. 00AI, let's start the interrogation.[/]",
+    messageContents.Recipient
+);
