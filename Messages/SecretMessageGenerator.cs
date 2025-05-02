@@ -53,7 +53,7 @@ public static class SecretMessageGenerator
         int? key = null;
         if (Name == "Caesar Cipher")
         {
-            key = random.Next(1, 26); // Random shift for Caesar
+            key = random.Next(1, 10); // Random shift for Caesar
             encryptedMessage = Algorithm(originalMessage, key);
         }
         else
