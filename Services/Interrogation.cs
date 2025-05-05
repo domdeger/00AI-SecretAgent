@@ -64,6 +64,8 @@ public static class Interrogation
                 messagePart.AuthorName,
                 messagePart.Content
             );
+
+            await Task.Delay(1000);
         }
     }
 }
